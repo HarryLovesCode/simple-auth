@@ -1,0 +1,27 @@
+config:
+  target: "http://localhost:3000"
+  phases:
+    - duration: 10
+      arrivalRate: 5
+      name: Warm up
+    - duration: 120
+      arrivalRate: 5
+      rampTo: 3000
+      name: Ramp up load
+
+scenarios: 
+  - name: "Protected endpoint"
+    flow:
+      # - post:
+      #     url: "/api/login"
+      #     json:
+      #       email: "hgould@conaservices.com"
+      #       password: "testingComplexity"
+      #       name: "Harry Gould"
+      #     capture:
+      #       - json: "$.results.token"
+      #         as: "token"
+      - post:
+          url: "/protected"
+          json:
+            token: "Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ1c2VyIjoiaGdvdWxkQGNvbmFzZXJ2aWNlcy5jb20iLCJpYXQiOjE2NzI3NjY3NjF9.LQOL6bNtVG53eMWl0-yj9gLGE6BCFAkLvJHiJZU8u_A"
