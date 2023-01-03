@@ -6,7 +6,7 @@ config:
       name: Warm up
     - duration: 120
       arrivalRate: 5
-      rampTo: 3000
+      rampTo: 5000
       name: Ramp up load
 
 scenarios: 
@@ -24,4 +24,4 @@ scenarios:
       - post:
           url: "/protected"
           json:
-            token: "Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ1c2VyIjoiaGdvdWxkQGNvbmFzZXJ2aWNlcy5jb20iLCJpYXQiOjE2NzI3NjY3NjF9.LQOL6bNtVG53eMWl0-yj9gLGE6BCFAkLvJHiJZU8u_A"
+            token: "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ1c2VyIjoiaGdvdWxkQGNvbmFzZXJ2aWNlcy5jb20iLCJpYXQiOjE2NzI3Nzc5NTB9.2b0hyFT_UWPtOz8IJ0MdK6x7OIAsEBLE_dGikJ5z7Sg"

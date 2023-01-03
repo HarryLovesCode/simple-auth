@@ -1,8 +1,8 @@
 import pino from "pino";
 import cookieParser from "cookie-parser";
 import rateLimit from "express-rate-limit";
+import uWS, { App, HttpRequest, HttpResponse } from "uWebSockets.js";
 
-import express, { NextFunction, Request, Response } from "express";
 import { sign, verify } from "jsonwebtoken";
 import { config } from "dotenv";
 import { SimpleUserDB } from "./database";
@@ -11,7 +11,7 @@ import { z } from "zod";
 
 config();
 
-const app = express();
+const app = App();
 const logger = pino();
 const db = new SimpleUserDB();
 
@@ -25,35 +25,26 @@ const authLimiter = rateLimit({
 
 const secret = process.env.SECRET || "secret";
 
-app.use(express.json());
-app.use(cookieParser());
+async function verifyToken(req: HttpRequest, res: HttpResponse) {
+  let _tokenInp = await readJson(res);
+  let _token = _tokenInp.token;
+  logger.debug(_token);
 
-function verifyToken(req: Request, res: Response, next: NextFunction) {
-  try {
-    let _token = req.body.token || req.headers.authorization;
-    logger.debug(_token);
+  if (_token) {
+    _token = _token;
+    if (!_token) throw new Error("Unauthorized.");
+  }
 
-    if (_token) {
-      _token = _token?.split(" ")[1];
-      if (!_token) throw new Error("Unauthorized.");
-    } else {
-      _token = req.cookies.token;
-    }
+  const token = _token;
 
-    const token = _token;
+  if (token) {
+    const decoded = verify(token, secret);
 
-    if (token) {
-      const decoded = verify(token, secret);
+    if (!decoded) throw new Error("Unauthorized.");
 
-      if (!decoded) throw new Error("Unauthorized.");
-
-      return next();
-    } else {
-      throw new Error("Unauthorized.");
-    }
-  } catch (err: any) {
-    logger.error(err.message);
-    return res.status(401).json({ message: err.message });
+    return decoded;
+  } else {
+    throw new Error("Unauthorized.");
   }
 }
 
@@ -84,96 +75,160 @@ async function attemptUserGet(body: any) {
   }
 }
 
-async function signup(req: Request, res: Response) {
-  const userInfo = req.body;
+async function signup(req: HttpRequest, res: HttpResponse) {
+  res.writeHeader("Content-Type", "application/json");
+  const userInfo = await readJson(res);
 
-  if (!validateSchema(userInfo, signupSchema)) {
+  if (!validateSchema(userInfo, loginSchema)) {
     logger.error("Failed to validate schema.");
-    return res.status(400).json({ message: "Invalid schema." });
+    res.writeStatus("400");
+    res.write(JSON.stringify({ message: "Invalid schema." }));
+    return res.end();
   }
 
   if (!(await attemptUserStore(userInfo))) {
-    logger.error("Failed to store user.");
-    return res.status(400).json({ message: "Failed to store user." });
+    logger.error("Failed to get user.");
+    res.writeStatus("400");
+    res.write(JSON.stringify({ message: "Failed to store user." }));
+    return res.end();
   }
 
   const { email } = userInfo;
 
-  logger.info(`Signup attempt for ${email}`);
+  logger.debug(`Signup attempt for ${email}`);
 
   const signature = { user: email };
 
   sign(signature, secret, (err: Error | null, token?: string) => {
     if (err) {
       logger.error(err);
-      return res.status(500).send("Internal server error");
+      res.writeStatus("500").send("Internal server error");
     }
 
-    res.cookie("token", token, {
-      httpOnly: true,
-      secure: true,
-      sameSite: "none",
-    });
+    res.writeHeader(
+      "Set-Cookie",
+      "token=" + token + "; HttpOnly; Secure; SameSite=None"
+    );
 
-    res.json({
-      token,
-    });
+    res.write(JSON.stringify({ token }));
+    return res.end();
   });
 }
 
-async function signin(req: Request, res: Response) {
-  const userInfo = req.body;
+async function readJson(res: HttpResponse): Promise<any> {
+  return new Promise((resolve, reject) => {
+    let buffer: Buffer = Buffer.from("");
+
+    res.onData((ab, isLast) => {
+      let chunk = Buffer.from(ab).toString();
+
+      if (isLast) {
+        if (buffer) {
+          try {
+            let _tmpBuf = Buffer.from(buffer);
+            let _tmpChunk = Buffer.from(chunk);
+
+            resolve(JSON.parse(Buffer.concat([_tmpBuf, _tmpChunk]).toString()));
+          } catch (_err: any) {
+            res.close();
+            reject();
+          }
+        } else {
+          try {
+            resolve(JSON.parse(chunk));
+          } catch (_err: any) {
+            res.close();
+            reject();
+          }
+        }
+      } else {
+        if (buffer) {
+          let _tmpChunk = Buffer.from(chunk);
+          buffer = Buffer.concat([buffer, _tmpChunk]);
+        } else {
+          buffer = Buffer.from(chunk);
+        }
+      }
+    });
+
+    res.onAborted(reject);
+  });
+}
+
+async function signin(req: HttpRequest, res: HttpResponse) {
+  res.writeHeader("Content-Type", "application/json");
+  const start = Date.now();
+  const userInfo = await readJson(res);
+
+  logger.debug(`Read json in ${Date.now() - start}ms`);
+
+  console.log(userInfo);
 
   if (!validateSchema(userInfo, loginSchema)) {
     logger.error("Failed to validate schema.");
-    return res.status(400).json({ message: "Invalid schema." });
+    res.writeStatus("400");
+    res.write(JSON.stringify({ message: "Invalid schema." }));
+    return res.end();
   }
 
   if (!(await attemptUserGet(userInfo))) {
     logger.error("Failed to get user.");
-    return res.status(400).json({ message: "Failed to get user." });
+    res.writeStatus("400");
+    res.write(JSON.stringify({ message: "Failed to get user." }));
+    return res.end();
   }
 
   const { email } = userInfo;
 
-  logger.info(`Signup attempt for ${email}`);
+  logger.debug(`Signin attempt for ${email}`);
 
   const signature = { user: email };
 
   sign(signature, secret, (err: Error | null, token?: string) => {
     if (err) {
       logger.error(err);
-      return res.status(500).send("Internal server error");
+      res.writeStatus("500").send("Internal server error");
     }
 
-    res.cookie("token", token, {
-      httpOnly: true,
-      secure: true,
-      sameSite: "none",
-    });
+    res.writeHeader(
+      "Set-Cookie",
+      "token=" + token + "; HttpOnly; Secure; SameSite=None"
+    );
 
-    res.json({
-      token,
-    });
+    res.write(JSON.stringify({ token }));
+    return res.end();
   });
 }
 
-app.all("/unprotected", (req, res) => {
+app.post("/unprotected", (res, req) => {
   res.json({ message: "Hello from unprotected endpoint." });
 });
 
-app.all("/protected", verifyToken, (req, res) => {
-  res.json({ message: "Hello from protected endpoint." });
+app.post("/protected", async (res, req) => {
+  await verifyToken(req, res)
+    .then((decoded) => {
+      res.write(JSON.stringify({ message: "Hello from protected endpoint." }));
+      res.end();
+    })
+    .catch((err) => {
+      logger.error(err)
+      res.write(JSON.stringify({ message: err }));
+      res.end();
+    });
 });
 
-app.post("/api/login", authLimiter, async (req, res) => {
+app.post("/api/login", async (res, req) => {
   await signin(req, res);
 });
 
-app.post("/api/signup", authLimiter, async (req, res) => {
+app.post("/api/signup", async (res, req) => {
   await signup(req, res);
 });
 
-app.listen(3000, () => {
-  logger.info("Server started on port 3000...");
+app.listen(3000, (token) => {
+  if (token) {
+    logger.info("Listening to port 3000");
+  } else {
+    logger.error("Failed to listen to port 3000.");
+  }
 });
